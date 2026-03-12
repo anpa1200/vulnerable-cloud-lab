@@ -1,0 +1,18 @@
+# Terraform state — never commit
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+
+# Variable files with real values — never commit
+*.tfvars
+!*.tfvars.example
+
+# Generated files
+function_code.zip
+crash.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+tfplan
