@@ -4,6 +4,30 @@
 
 ---
 
+## Table of Contents
+
+1. [The Problem With Learning Cloud Security](#the-problem-with-learning-cloud-security)
+2. [What We're Building](#what-were-building)
+3. [Part 1: The Vulnerable GCP Lab](#part-1-the-vulnerable-gcp-lab)
+   - [What's Deployed](#whats-deployed)
+   - [The Attack Surface at a Glance](#the-attack-surface-at-a-glance)
+4. [Part 2: StratusAI — The Scanner](#part-2-stratusai--the-scanner)
+   - [How the AI Analysis Works](#how-the-ai-analysis-works)
+5. [Part 3: Running the Full Audit](#part-3-running-the-full-audit)
+   - [Interactive Setup](#interactive-setup-2-minutes)
+   - [Terraform Deployment](#terraform-deployment-8-minutes)
+   - [Internal GCP Scan](#internal-gcp-scan-4-minutes)
+   - [External Scans](#external-scans-6-minutes-total-3-targets)
+   - [The Report](#the-report)
+   - [Teardown](#teardown)
+6. [What the AI Actually Finds](#what-the-ai-actually-finds)
+7. [The Architecture Decisions Worth Stealing](#the-architecture-decisions-worth-stealing)
+8. [Running It Against Your Own GCP Project](#running-it-against-your-own-gcp-project)
+9. [What's Next](#whats-next)
+10. [Getting Started (TL;DR)](#getting-started-tldr)
+
+---
+
 ## The Problem With Learning Cloud Security
 
 Cloud security is hard to practice. You can't run SQL injection against someone else's database. You can't test SSRF against a production metadata server. You can't enumerate IAM misconfigurations in an account you don't own.
@@ -560,6 +584,10 @@ Deploy it. Break it. Fix it. Repeat.
 ## Getting Started (TL;DR)
 
 **Requirements**: terraform, gcloud, docker, an Anthropic API key, a GCP project
+
+### Deploy directly from GitHub (Cloud Shell / Codespaces)
+
+If you want to run this from a cloud-based shell (Cloud Shell, Codespaces, etc.), the same repo + script flow works:
 
 ```bash
 # 1. Clone the lab
