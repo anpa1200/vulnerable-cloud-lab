@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# verify.sh — Post-deploy vulnerability verification for the GCP Lab
+# verify.sh — Post-deploy vulnerability verification for the Vulnerable Cloud Lab
 # =============================================================================
 # Checks that all intentional vulnerabilities are reachable and working.
 # Run this after 'deploy.sh' completes.
@@ -9,7 +9,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-TERRAFORM_DIR="${REPO_ROOT}/terraform"
+TERRAFORM_DIR_GCP="${REPO_ROOT}/terraform"
+TERRAFORM_DIR_AWS="${REPO_ROOT}/terraform/aws"
 
 RED='\033[0;31m'
 YELLOW='\033[1;33m'
@@ -17,6 +18,34 @@ GREEN='\033[0;32m'
 CYAN='\033[0;36m'
 BOLD='\033[1m'
 NC='\033[0m'
+
+select_provider() {
+  echo ""
+  echo "Which cloud provider did you deploy the lab to?"
+  echo "  1) Google Cloud Platform (GCP)"
+  echo "  2) Amazon Web Services (AWS)"
+  echo ""
+
+  read -rp "  Choose [1/2] (default 1): " choice
+  choice="${choice:-1}"
+
+  case "$choice" in
+    1|gcp|GCP)
+      PROVIDER="gcp"
+      TERRAFORM_DIR="${TERRAFORM_DIR_GCP}"
+      ;; 
+    2|aws|AWS)
+      PROVIDER="aws"
+      TERRAFORM_DIR="${TERRAFORM_DIR_AWS}"
+      ;; 
+    *)
+      warn "Invalid choice. Please enter 1 for GCP or 2 for AWS."
+      select_provider
+      ;; 
+  esac
+
+  ok "Selected provider: ${PROVIDER^^}"
+}
 
 PASS=0
 FAIL=0
@@ -37,20 +66,38 @@ tf_output() {
 
 get_outputs() {
   info "Reading Terraform outputs..."
-  WEB_IP=$(tf_output web_server_ip)
-  FUNCTION_URL=$(tf_output cloud_function_url)
-  RUN_URL=$(tf_output cloud_run_url)
-  BUCKET_NAME=$(tf_output vulnerable_bucket_name)
 
-  [[ -z "$WEB_IP" ]]       && die "Could not read web_server_ip from terraform output. Is the lab deployed?"
-  [[ -z "$FUNCTION_URL" ]] && die "Could not read cloud_function_url"
-  [[ -z "$RUN_URL" ]]      && die "Could not read cloud_run_url"
-  [[ -z "$BUCKET_NAME" ]]  && die "Could not read vulnerable_bucket_name"
+  if [[ "$PROVIDER" == "gcp" ]]; then
+    WEB_IP=$(tf_output web_server_ip)
+    DVWA_URL="http://${WEB_IP}/"
+    FUNCTION_URL=$(tf_output cloud_function_url)
+    RUN_URL=$(tf_output cloud_run_url)
+    BUCKET_NAME=$(tf_output vulnerable_bucket_name)
 
-  info "Web server IP  : ${WEB_IP}"
-  info "Cloud Function : ${FUNCTION_URL}"
-  info "Cloud Run      : ${RUN_URL}"
-  info "Bucket         : ${BUCKET_NAME}"
+    [[ -z "$WEB_IP" ]]       && die "Could not read web_server_ip from terraform output. Is the lab deployed?"
+    [[ -z "$FUNCTION_URL" ]] && die "Could not read cloud_function_url"
+    [[ -z "$RUN_URL" ]]      && die "Could not read cloud_run_url"
+    [[ -z "$BUCKET_NAME" ]]  && die "Could not read vulnerable_bucket_name"
+
+    info "Web server IP  : ${WEB_IP}"
+    info "DVWA URL       : ${DVWA_URL}"
+    info "Cloud Function : ${FUNCTION_URL}"
+    info "Cloud Run      : ${RUN_URL}"
+    info "Bucket         : ${BUCKET_NAME}"
+  else
+    DVWA_URL=$(tf_output dvwa_url)
+    FUNCTION_URL=$(tf_output lambda_url)
+    BUCKET_NAME=$(tf_output s3_bucket_name)
+
+    [[ -z "$DVWA_URL" ]]      && die "Could not read dvwa_url from terraform output. Is the lab deployed?"
+    [[ -z "$FUNCTION_URL" ]]  && die "Could not read lambda_url"
+    [[ -z "$BUCKET_NAME" ]]   && die "Could not read s3_bucket_name"
+
+    info "DVWA URL       : ${DVWA_URL}"
+    info "Lambda URL     : ${FUNCTION_URL}"
+    info "S3 Bucket      : ${BUCKET_NAME}"
+  fi
+
   echo ""
 }
 
@@ -74,16 +121,16 @@ check_dvwa() {
   echo -e "${BOLD}── DVWA / Web Server ──────────────────────────────────────────${NC}"
 
   local status
-  status=$(http_status "http://${WEB_IP}/")
+  status=$(http_status "${DVWA_URL}")
   if [[ "$status" == "200" || "$status" == "302" ]]; then
-    ok "DVWA is reachable at http://${WEB_IP}/ (HTTP ${status})"
+    ok "DVWA is reachable at ${DVWA_URL} (HTTP ${status})"
   else
     fail "DVWA not reachable (HTTP ${status})"
   fi
 
-  status=$(http_status "http://${WEB_IP}/info.php")
+  status=$(http_status "${DVWA_URL}info.php")
   if [[ "$status" == "200" ]]; then
-    ok "Information disclosure page accessible: http://${WEB_IP}/info.php"
+    ok "Information disclosure page accessible: ${DVWA_URL}info.php"
   else
     fail "info.php not reachable (HTTP ${status})"
   fi
@@ -170,7 +217,16 @@ check_cloud_run() {
 check_bucket() {
   echo -e "${BOLD}── Public Storage Bucket ───────────────────────────────────────${NC}"
 
-  local creds_url="https://storage.googleapis.com/${BUCKET_NAME}/secrets/database-credentials.json"
+  local creds_url
+  local key_url
+  if [[ "$PROVIDER" == "gcp" ]]; then
+    creds_url="https://storage.googleapis.com/${BUCKET_NAME}/secrets/database-credentials.json"
+    key_url="https://storage.googleapis.com/${BUCKET_NAME}/keys/id_rsa"
+  else
+    creds_url="https://${BUCKET_NAME}.s3.amazonaws.com/secrets/database-credentials.json"
+    key_url="https://${BUCKET_NAME}.s3.amazonaws.com/keys/id_rsa"
+  fi
+
   local status
   status=$(http_status "$creds_url")
   if [[ "$status" == "200" ]]; then
@@ -184,7 +240,6 @@ check_bucket() {
     fail "Credentials file not accessible (HTTP ${status})"
   fi
 
-  local key_url="https://storage.googleapis.com/${BUCKET_NAME}/keys/id_rsa"
   status=$(http_status "$key_url")
   if [[ "$status" == "200" ]]; then
     local key_body
@@ -226,12 +281,15 @@ print_summary() {
 # ---------------------------------------------------------------------------
 
 echo -e "${CYAN}${BOLD}"
-echo "  GCP Vulnerable Cloud Lab — Post-Deploy Verification"
+echo "  Vulnerable Cloud Lab — Post-Deploy Verification"
 echo -e "${NC}"
 
+select_provider
 get_outputs
 check_dvwa
 check_cloud_function
-check_cloud_run
+if [[ "$PROVIDER" == "gcp" ]]; then
+  check_cloud_run
+fi
 check_bucket
 print_summary

@@ -1,12 +1,21 @@
-# GCP Vulnerable Cloud Lab
+# Vulnerable Cloud Lab (GCP + AWS)
 
 > **WARNING: This repository deploys intentionally vulnerable infrastructure.**
 > Use only in isolated GCP projects dedicated to security training and research.
 > **Never deploy in production. Destroy resources when finished.**
 
-A fully automated Terraform deployment of a deliberately misconfigured Google Cloud Platform environment for practising cloud penetration testing, security assessments, and red team exercises.
+A fully automated Terraform deployment of a deliberately misconfigured cloud environment for practising cloud penetration testing, security assessments, and red team exercises.
 
-Based on the article: *Building a Vulnerable GCP Pentest Lab with Terraform*.
+The repo supports both **Google Cloud Platform (GCP)** and **Amazon Web Services (AWS)** deployments via an interactive wizard.
+
+Based on the article: *Building a Vulnerable Cloud Pentest Lab with Terraform*.
+
+---
+
+## Repository
+
+- Repo: https://github.com/anpa1200/vulnerable-cloud-lab
+- Author: https://github.com/anpa1200
 
 ---
 
@@ -43,7 +52,7 @@ Based on the article: *Building a Vulnerable GCP Pentest Lab with Terraform*.
 git clone https://github.com/anpa1200/vulnerable-cloud-lab.git
 cd vulnerable-cloud-lab
 
-# 2. Deploy (interactive — prompts for project ID and handles auth)
+# 2. Deploy (interactive wizard — choose GCP or AWS)
 bash scripts/deploy.sh
 
 # 3. Verify all vulnerabilities are reachable

@@ -1,16 +1,19 @@
 #!/usr/bin/env bash
 # =============================================================================
-# deploy.sh — One-command deployment for the GCP Vulnerable Cloud Lab
+# deploy.sh — One-command deployment for the Vulnerable Cloud Lab
 # =============================================================================
 # WARNING: This script deploys intentionally vulnerable infrastructure.
-#          Use only in isolated GCP projects dedicated to security training.
+#          Use only in isolated cloud accounts dedicated to security training.
 #          Destroy resources when finished: make -C terraform destroy
 # =============================================================================
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-TERRAFORM_DIR="${REPO_ROOT}/terraform"
+
+# Terraform paths for each cloud provider
+TERRAFORM_DIR_GCP="${REPO_ROOT}/terraform"
+TERRAFORM_DIR_AWS="${REPO_ROOT}/terraform/aws"
 
 RED='\033[0;31m'
 YELLOW='\033[1;33m'
@@ -22,7 +25,7 @@ NC='\033[0m'
 banner() {
   echo -e "${CYAN}"
   echo "╔══════════════════════════════════════════════════════════════╗"
-  echo "║          GCP Vulnerable Cloud Lab — Deployment               ║"
+  echo "║          Vulnerable Cloud Lab — Deployment Wizard            ║"
   echo "║          FOR SECURITY TRAINING USE ONLY                      ║"
   echo "╚══════════════════════════════════════════════════════════════╝"
   echo -e "${NC}"
@@ -34,17 +37,65 @@ ok()   { echo -e "${GREEN}[ OK ]${NC} $*"; }
 die()  { echo -e "${RED}[ERR ]${NC} $*" >&2; exit 1; }
 
 # ---------------------------------------------------------------------------
+# Provider selection
+# ---------------------------------------------------------------------------
+
+select_provider() {
+  echo ""
+  echo "Which cloud provider would you like to deploy the lab to?"
+  echo "  1) Google Cloud Platform (GCP)"
+  echo "  2) Amazon Web Services (AWS)"
+  echo ""
+
+  read -rp "  Choose [1/2] (default 1): " choice
+  choice="${choice:-1}"
+
+  case "$choice" in
+    1|gcp|GCP)
+      PROVIDER="gcp"
+      TERRAFORM_DIR="${TERRAFORM_DIR_GCP}"
+      SUMMARY_OUTPUT="lab_summary"
+      ;;
+    2|aws|AWS)
+      PROVIDER="aws"
+      TERRAFORM_DIR="${TERRAFORM_DIR_AWS}"
+      SUMMARY_OUTPUT="attack_surface_summary"
+      ;;
+    *)
+      warn "Invalid choice. Please enter 1 for GCP or 2 for AWS."
+      select_provider
+      ;;
+  esac
+
+  ok "Selected provider: ${PROVIDER^^}"
+}
+
+# ---------------------------------------------------------------------------
 # Pre-flight checks
 # ---------------------------------------------------------------------------
 
 check_dependencies() {
   info "Checking dependencies..."
-  for tool in terraform gcloud; do
+  local missing=()
+  local tools=(terraform)
+
+  if [[ "$PROVIDER" == "gcp" ]]; then
+    tools+=(gcloud)
+  else
+    tools+=(aws)
+  fi
+
+  for tool in "${tools[@]}"; do
     if ! command -v "$tool" &>/dev/null; then
-      die "'$tool' is not installed or not in PATH. Install it and retry."
+      missing+=("$tool")
+    else
+      ok "$tool found: $(command -v "$tool")"
     fi
-    ok "$tool found: $(command -v "$tool")"
   done
+
+  if [[ ${#missing[@]} -gt 0 ]]; then
+    die "Missing required tools: ${missing[*]}. Install them and retry."
+  fi
 }
 
 check_gcloud_auth() {
@@ -65,7 +116,26 @@ check_gcloud_auth() {
   ok "Application Default Credentials are configured."
 }
 
-setup_tfvars() {
+check_aws_auth() {
+  info "Checking AWS authentication..."
+  if ! aws sts get-caller-identity --output text &>/dev/null; then
+    warn "Unable to query AWS identity. Please configure AWS credentials."
+    echo "  You can run: aws configure"
+    echo "  Or set AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY/AWS_REGION environment variables."
+    read -rp "  Continue after configuring AWS credentials? (yes/no): " cont
+    [[ "$cont" != "yes" ]] && die "AWS credentials not configured. Aborting."
+
+    if ! aws sts get-caller-identity --output text &>/dev/null; then
+      die "Still unable to authenticate to AWS. Please check your credentials and retry."
+    fi
+  fi
+
+  local account
+  account=$(aws sts get-caller-identity --query Account --output text)
+  ok "AWS authenticated as account: ${account}"
+}
+
+setup_tfvars_gcp() {
   local tfvars="${TERRAFORM_DIR}/terraform.tfvars"
   if [[ -f "$tfvars" ]]; then
     ok "terraform.tfvars already exists — skipping setup."
@@ -93,8 +163,44 @@ EOF
   ok "Created ${tfvars}"
 }
 
+setup_tfvars_aws() {
+  local tfvars="${TERRAFORM_DIR}/terraform.tfvars"
+  if [[ -f "$tfvars" ]]; then
+    ok "terraform.tfvars already exists — skipping setup."
+    return
+  fi
+
+  warn "terraform.tfvars not found."
+  echo ""
+  echo -e "${BOLD}Please provide your AWS deployment settings:${NC}"
+
+  read -rp "  AWS Region [us-east-1]: " aws_region
+  aws_region="${aws_region:-us-east-1}"
+
+  read -rp "  Resource name prefix [vuln-lab]: " name_prefix
+  name_prefix="${name_prefix:-vuln-lab}"
+
+  read -rp "  Allowed SSH CIDR (default open, intentional vuln) [0.0.0.0/0]: " allowed_ssh_cidr
+  allowed_ssh_cidr="${allowed_ssh_cidr:-0.0.0.0/0}"
+
+  read -rp "  DVWA admin password [password]: " dvwa_admin_password
+  dvwa_admin_password="${dvwa_admin_password:-password}"
+
+  read -rp "  Database password [S3cr3tP@ssw0rd]: " db_password
+  db_password="${db_password:-S3cr3tP@ssw0rd}"
+
+  cat > "$tfvars" <<EOF
+aws_region        = "${aws_region}"
+name_prefix       = "${name_prefix}"
+allowed_ssh_cidr  = "${allowed_ssh_cidr}"
+dvwa_admin_password = "${dvwa_admin_password}"
+db_password        = "${db_password}"
+EOF
+  ok "Created ${tfvars}"
+}
+
 # ---------------------------------------------------------------------------
-# Deployment
+# Deployment steps
 # ---------------------------------------------------------------------------
 
 terraform_init() {
@@ -119,10 +225,9 @@ print_summary() {
   echo ""
   echo -e "${GREEN}${BOLD}Deployment complete!${NC}"
   echo ""
-  terraform -chdir="${TERRAFORM_DIR}" output lab_summary
+  terraform -chdir="${TERRAFORM_DIR}" output "${SUMMARY_OUTPUT}"
   echo ""
-  echo -e "${RED}${BOLD}REMINDER: Run 'bash scripts/cleanup.sh' or 'make -C terraform destroy'"
-  echo -e "          when you are finished to avoid unexpected GCP charges.${NC}"
+  echo -e "${RED}${BOLD}REMINDER: Run 'bash scripts/cleanup.sh' when finished to avoid unexpected cloud charges.${NC}"
   echo ""
 }
 
@@ -132,19 +237,28 @@ print_summary() {
 
 banner
 
+select_provider
+
 echo -e "${RED}${BOLD}"
 echo "  WARNING: You are about to deploy intentionally VULNERABLE"
-echo "  infrastructure to Google Cloud Platform."
+echo "  infrastructure to ${PROVIDER^^}."
 echo "  Only proceed if you understand the risks and are using an"
-echo "  isolated GCP project dedicated to security training."
+echo "  isolated cloud account dedicated to security training."
 echo -e "${NC}"
 
 read -rp "  Type 'yes' to confirm and continue: " confirm
 [[ "$confirm" != "yes" ]] && die "Aborted."
 
 check_dependencies
-check_gcloud_auth
-setup_tfvars
+
+if [[ "$PROVIDER" == "gcp" ]]; then
+  check_gcloud_auth
+  setup_tfvars_gcp
+else
+  check_aws_auth
+  setup_tfvars_aws
+fi
+
 terraform_init
 terraform_plan
 terraform_apply
