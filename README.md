@@ -8,7 +8,7 @@ A fully automated Terraform deployment of a deliberately misconfigured cloud env
 
 The repo supports both **Google Cloud Platform (GCP)** and **Amazon Web Services (AWS)** deployments via an interactive wizard.
 
-Based on the article: *Building a Vulnerable Cloud Pentest Lab with Terraform*.
+Based on the article: [*Building a Vulnerable Cloud Pentest Lab with Terraform*](https://medium.com/@1200km/building-a-vulnerable-cloud-pentest-lab-with-terraform-9858ac96b29e).
 
 ---
 
